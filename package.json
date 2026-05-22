@@ -1,0 +1,64 @@
+{
+  "name": "xero-invoicer",
+  "version": "0.1.0",
+  "description": "Xero Invoice Automation desktop app for Teach Education / Keep Education",
+  "author": "Josh",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:mac": "electron-vite build && electron-builder --mac"
+  },
+  "dependencies": {
+    "electron-store": "8.2.0",
+    "express": "4.21.2",
+    "fuse.js": "7.0.0",
+    "xero-node": "9.2.0",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.0",
+    "@types/node": "22.10.5",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "electron": "33.3.1",
+    "electron-builder": "25.1.8",
+    "electron-vite": "2.3.0",
+    "postcss": "8.4.49",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-router-dom": "7.1.1",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.2",
+    "vite": "5.4.11"
+  },
+  "build": {
+    "appId": "com.teacheducation.xero-invoicer",
+    "productName": "Xero Invoicer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
+  }
+}
