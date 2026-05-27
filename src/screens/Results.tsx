@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useRun } from '../lib/RunContext';
+import { expandLine } from '../lib/billing';
 import { formatGBP, plural } from '../lib/format';
 import type { InvoiceCreationResult } from '../../shared/types';
 
@@ -72,12 +73,7 @@ export default function Results(): JSX.Element {
         dueDate: '',
         weekEnding: parse.weekEndingDate,
         total: original.totalAmount,
-        lines: original.lines.map((l) => ({
-          description: l.description,
-          quantity: 1,
-          unitAmount: l.invoiceAmount,
-          isAwr: l.isAwr,
-        })),
+        lines: original.lines.flatMap((l) => expandLine(l)),
       };
       // Resolve the contact ID via mappings.
       const mappings = await window.api.store.getMappings();

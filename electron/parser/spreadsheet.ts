@@ -79,9 +79,13 @@ function normaliseSchoolKey(name: string): string {
 
 const AWR_RE = /\(\s*awr\s*\)/i;
 
+/**
+ * Short summary of the spreadsheet row, used only for the Parse preview
+ * screen. The actual invoice line descriptions are generated separately in
+ * src/lib/billing.ts so we can split full/part days into their own line items
+ * without the W/E (which is already on the invoice as the reference).
+ */
 function buildDescription(
-  teacher: string,
-  weekEnding: string,
   fullDays: number,
   partDays: number,
   isAwr: boolean,
@@ -94,9 +98,8 @@ function buildDescription(
     parts.push(`${partDays} part day${partDays === 1 ? '' : 's'}`);
   }
   const daysClause = parts.length > 0 ? parts.join(', ') : 'placement';
-  const teacherClean = teacher.replace(/\s+/g, ' ').trim();
   const suffix = isAwr ? ' (AWR)' : '';
-  return `${teacherClean} — W/E ${weekEnding} — ${daysClause}${suffix}`;
+  return `${daysClause}${suffix}`;
 }
 
 /**
@@ -105,7 +108,7 @@ function buildDescription(
  */
 export function parseWorkbook(
   filePath: string,
-  weekEndingDate: string,
+  _weekEndingDate: string,
 ): { lines: ParsedLine[]; warnings: ParseWarning[]; skippedCount: number } {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const sheetName =
@@ -201,13 +204,7 @@ export function parseWorkbook(
     const awrFromCol = safeString(row[COL.awr]).trim();
     const isAwr = AWR_RE.test(notesRaw) || (awrFromCol.length > 0 && AWR_RE.test(awrFromCol));
 
-    const description = buildDescription(
-      teacher,
-      weekEndingDate,
-      fullDays,
-      partDays,
-      isAwr,
-    );
+    const description = buildDescription(fullDays, partDays, isAwr);
 
     lines.push({
       rowNumber,

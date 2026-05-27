@@ -6,6 +6,7 @@ const invoke = ipcRenderer.invoke.bind(ipcRenderer);
 const api: BridgeApi = {
   app: {
     version: () => invoke('app:version'),
+    envInfo: () => invoke('app:env-info'),
   },
   shell: {
     openExternal: (url) => invoke('shell:open-external', url),

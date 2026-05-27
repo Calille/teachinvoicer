@@ -22,6 +22,11 @@ import type {
 export interface BridgeApi {
   app: {
     version: () => Promise<string>;
+    envInfo: () => Promise<{
+      envPath: string | null;
+      expectedPath: string;
+      hasCredentials: boolean;
+    }>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

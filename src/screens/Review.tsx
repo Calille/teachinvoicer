@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useRun } from '../lib/RunContext';
+import { expandLine } from '../lib/billing';
 import { formatGBP, plural } from '../lib/format';
 import type {
   AppSettings,
@@ -80,12 +81,7 @@ export default function Review(): JSX.Element {
         dueDate,
         weekEnding: parse.weekEndingDate,
         total: inv.totalAmount,
-        lines: inv.lines.map((l) => ({
-          description: l.description,
-          quantity: 1,
-          unitAmount: l.invoiceAmount,
-          isAwr: l.isAwr,
-        })),
+        lines: inv.lines.flatMap((l) => expandLine(l)),
       });
     }
     setPrepared(prep);

@@ -11,31 +11,47 @@ import { registerInvoiceIpc } from './xero/invoices';
 import { registerSettingsIpc } from './ipc/settings';
 import { registerStoreIpc } from './ipc/store';
 
-// Load .env from project root (dev) or app resources (production).
-function loadDotEnv(): void {
-  const candidates = [
-    path.join(process.cwd(), '.env'),
-    path.join(app.getAppPath(), '.env'),
-    path.join(app.getAppPath(), '..', '.env'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) {
-      const content = readFileSync(p, 'utf-8');
-      for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('#')) continue;
-        const eq = line.indexOf('=');
-        if (eq === -1) continue;
-        const k = line.slice(0, eq).trim();
-        const v = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-        if (k && !(k in process.env)) process.env[k] = v;
-      }
-      break;
-    }
+/**
+ * Resolve where .env may live. In dev we expect it next to package.json. In
+ * production (packaged installer) the install dir is read-only and Josh's
+ * credentials shouldn't be baked into the installer, so we look in:
+ *
+ *   1. %APPDATA%\Xero Invoicer\.env       (preferred — Roaming app data)
+ *   2. portable folder next to the exe    (for USB-stick / portable installs)
+ *   3. process.cwd()                       (covers `npm run dev`)
+ *   4. inside the asar bundle              (last resort)
+ */
+function envSearchPaths(): string[] {
+  const paths: string[] = [];
+  try {
+    paths.push(path.join(app.getPath('userData'), '.env'));
+  } catch {
+    // app.getPath may not be available before app.ready in some edge cases
   }
+  paths.push(path.join(path.dirname(app.getPath('exe')), '.env'));
+  paths.push(path.join(process.cwd(), '.env'));
+  paths.push(path.join(app.getAppPath(), '.env'));
+  paths.push(path.join(app.getAppPath(), '..', '.env'));
+  return paths;
 }
 
-loadDotEnv();
+function loadDotEnv(): string | null {
+  for (const p of envSearchPaths()) {
+    if (!existsSync(p)) continue;
+    const content = readFileSync(p, 'utf-8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      const k = line.slice(0, eq).trim();
+      const v = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+      if (k && !(k in process.env)) process.env[k] = v;
+    }
+    return p;
+  }
+  return null;
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -167,7 +183,16 @@ function registerCoreIpc(): void {
   });
 
   ipcMain.handle('app:version', () => app.getVersion());
+
+  ipcMain.handle('app:env-info', () => ({
+    envPath: loadedEnvPath,
+    expectedPath: path.join(app.getPath('userData'), '.env'),
+    hasCredentials:
+      !!process.env['XERO_CLIENT_ID'] && !!process.env['XERO_CLIENT_SECRET'],
+  }));
 }
+
+let loadedEnvPath: string | null = null;
 
 // ---------------------------------------------------------------------------
 
@@ -178,6 +203,8 @@ app.whenReady().then(() => {
       fileURLToPath(import.meta.url),
     );
   }
+
+  loadedEnvPath = loadDotEnv();
 
   registerCoreIpc();
   registerStoreIpc();

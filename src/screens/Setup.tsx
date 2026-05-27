@@ -2,16 +2,27 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ConnectionStatus } from '../../shared/types';
 
+type EnvInfo = {
+  envPath: string | null;
+  expectedPath: string;
+  hasCredentials: boolean;
+};
+
 export default function Setup(): JSX.Element {
   const navigate = useNavigate();
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
+  const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async (): Promise<void> => {
     try {
-      const s = await window.api.xero.status();
+      const [s, env] = await Promise.all([
+        window.api.xero.status(),
+        window.api.app.envInfo(),
+      ]);
       setStatus(s);
+      setEnvInfo(env);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -58,6 +69,28 @@ export default function Setup(): JSX.Element {
 
           {status && !status.connected && (
             <div className="space-y-4">
+              {envInfo && !envInfo.hasCredentials && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <div className="mb-1 font-semibold">Xero credentials not found</div>
+                  <p className="mb-2">
+                    Create a file called <code className="font-mono">.env</code> at the path below
+                    with your Xero developer client ID and secret, then restart the app.
+                  </p>
+                  <pre className="overflow-x-auto rounded bg-white/70 p-2 font-mono text-[11px] leading-snug text-slate-800">
+{envInfo.expectedPath}{`
+
+XERO_CLIENT_ID=...
+XERO_CLIENT_SECRET=...
+XERO_REDIRECT_PORT=5391`}
+                  </pre>
+                </div>
+              )}
+              {envInfo?.envPath && (
+                <p className="text-xs text-slate-500">
+                  Loaded credentials from{' '}
+                  <code className="font-mono">{envInfo.envPath}</code>
+                </p>
+              )}
               <p className="text-sm text-slate-600">
                 You'll be sent to Xero in your browser to authorise this app. After approving,
                 you'll be redirected back automatically.
@@ -65,7 +98,7 @@ export default function Setup(): JSX.Element {
               <button
                 type="button"
                 onClick={handleConnect}
-                disabled={connecting}
+                disabled={connecting || (envInfo !== null && !envInfo.hasCredentials)}
                 className="btn-primary"
               >
                 {connecting ? 'Waiting for authorisation…' : 'Connect to Xero'}

@@ -1,6 +1,6 @@
 {
   "name": "xero-invoicer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Xero Invoice Automation desktop app for Teach Education / Keep Education",
   "author": "Josh",
   "main": "out/main/index.js",
@@ -55,7 +55,17 @@
       "category": "public.app-category.productivity"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Xero Invoicer",
+      "uninstallDisplayName": "Xero Invoicer ${version}"
     },
     "linux": {
       "target": ["AppImage"]
