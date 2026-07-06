@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { registerXeroIpc, shutdownAuthServer } from './xero/auth';
 import { registerXeroClientIpc } from './xero/client';
@@ -181,6 +181,21 @@ function registerCoreIpc(): void {
     if (res.canceled || res.filePaths.length === 0) return null;
     return res.filePaths[0];
   });
+
+  ipcMain.handle(
+    'dialog:save-csv',
+    async (_evt, defaultName: string, contents: string) => {
+      if (!mainWindow) return null;
+      const safeName = defaultName.replace(/[^\w.\-]+/g, '_');
+      const res = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(app.getPath('downloads'), safeName),
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+      });
+      if (res.canceled || !res.filePath) return null;
+      writeFileSync(res.filePath, contents, 'utf-8');
+      return res.filePath;
+    },
+  );
 
   ipcMain.handle('app:version', () => app.getVersion());
 

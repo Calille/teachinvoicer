@@ -13,6 +13,8 @@ const api: BridgeApi = {
   },
   dialog: {
     openSpreadsheet: () => invoke('dialog:open-file'),
+    saveCsv: (defaultName, contents) =>
+      invoke('dialog:save-csv', defaultName, contents),
   },
   xero: {
     status: () => invoke('xero:status'),

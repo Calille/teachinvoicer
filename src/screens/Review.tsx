@@ -61,6 +61,9 @@ export default function Review(): JSX.Element {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  // Per-invoice selection. Defaults to "all selected" whenever the prepared
+  // list changes (e.g. after re-matching).
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   // Build prepared invoices from matches + parse.
   useEffect(() => {
@@ -135,10 +138,51 @@ export default function Review(): JSX.Element {
     };
   }, [prepared]);
 
+  // Reset selection to all-selected whenever the prepared list shape changes.
+  useEffect(() => {
+    setSelectedKeys(new Set(prepared.map((p) => p.schoolKey)));
+  }, [prepared]);
+
   const totalAmount = useMemo(
     () => prepared.reduce((sum, inv) => sum + inv.total, 0),
     [prepared],
   );
+
+  const selectedInvoices = useMemo(
+    () => prepared.filter((p) => selectedKeys.has(p.schoolKey)),
+    [prepared, selectedKeys],
+  );
+
+  const selectedTotal = useMemo(
+    () => selectedInvoices.reduce((sum, inv) => sum + inv.total, 0),
+    [selectedInvoices],
+  );
+
+  const toggleOne = (schoolKey: string): void => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(schoolKey)) next.delete(schoolKey);
+      else next.add(schoolKey);
+      return next;
+    });
+  };
+
+  const selectAll = (): void => {
+    setSelectedKeys(new Set(prepared.map((p) => p.schoolKey)));
+  };
+
+  const selectNone = (): void => {
+    setSelectedKeys(new Set());
+  };
+
+  const deselectDuplicates = (): void => {
+    const dupKeys = new Set(duplicates.map((d) => d.schoolKey));
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      for (const k of dupKeys) next.delete(k);
+      return next;
+    });
+  };
 
   const effectiveDryRun = dryRunOverride ?? settings?.dryRunDefault ?? true;
 
@@ -149,14 +193,18 @@ export default function Review(): JSX.Element {
       return;
     }
     if (!parse) return;
+    if (selectedInvoices.length === 0) {
+      setError('Tick at least one invoice to create.');
+      return;
+    }
     setCreating(true);
     setError(null);
-    setProgress({ index: 0, total: prepared.length, school: '' });
+    setProgress({ index: 0, total: selectedInvoices.length, school: '' });
 
     const off = window.api.events.onInvoiceProgress((p) => setProgress(p));
 
     try {
-      const results = await window.api.invoices.create(prepared, {
+      const results = await window.api.invoices.create(selectedInvoices, {
         accountCode: settings.accountCode,
         taxType: settings.taxType,
         brandingThemeId: settings.brandingThemeId,
@@ -204,14 +252,21 @@ export default function Review(): JSX.Element {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Review &amp; create drafts</h1>
           <p className="mt-1 text-sm text-slate-600">
-            About to create <span className="font-semibold">{prepared.length}</span>{' '}
-            <span className="badge-amber">DRAFT</span> {plural(prepared.length, 'invoice')} totalling{' '}
-            <span className="font-semibold tabular">{formatGBP(totalAmount)}</span>.
-            Drafts will <strong>not</strong> be sent automatically — Josh sends from Xero.
+            <span className="font-semibold">{selectedInvoices.length}</span> of{' '}
+            <span className="font-semibold">{prepared.length}</span>{' '}
+            {plural(prepared.length, 'invoice')} selected — totalling{' '}
+            <span className="font-semibold tabular">{formatGBP(selectedTotal)}</span>
+            {selectedInvoices.length !== prepared.length && (
+              <span className="text-slate-400">
+                {' '}
+                (of {formatGBP(totalAmount)} available)
+              </span>
+            )}
+            . Drafts will <strong>not</strong> be sent automatically — Josh sends from Xero.
           </p>
           {skippedCount > 0 && (
             <p className="mt-1 text-xs text-slate-500">
-              {skippedCount} {plural(skippedCount, 'school')} skipped.
+              {skippedCount} {plural(skippedCount, 'school')} skipped at the matching step.
             </p>
           )}
         </div>
@@ -247,23 +302,68 @@ export default function Review(): JSX.Element {
           </div>
         )}
 
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
+          <span className="text-slate-500">Bulk:</span>
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={selectedInvoices.length === prepared.length}
+            className="btn-ghost text-xs"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={selectNone}
+            disabled={selectedInvoices.length === 0}
+            className="btn-ghost text-xs"
+          >
+            Select none
+          </button>
+          {duplicates.length > 0 && (
+            <button
+              type="button"
+              onClick={deselectDuplicates}
+              className="btn-ghost text-xs"
+              title="Untick any school that already has an invoice with this week's reference in Xero"
+            >
+              Untick {duplicates.length} possible {plural(duplicates.length, 'duplicate')}
+            </button>
+          )}
+        </div>
+
         <div className="space-y-2">
-          {prepared.map((inv) => (
+          {prepared.map((inv) => {
+            const isSelected = selectedKeys.has(inv.schoolKey);
+            const isDup = duplicates.some((d) => d.schoolKey === inv.schoolKey);
+            return (
             <details
               key={inv.schoolKey}
-              className="card overflow-hidden"
+              className={[
+                'card overflow-hidden transition-opacity',
+                isSelected ? '' : 'opacity-60',
+              ].join(' ')}
             >
               <summary className="flex cursor-pointer items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50">
                 <div className="flex min-w-0 items-center gap-3">
+                  <input
+                    type="checkbox"
+                    aria-label={`Include ${inv.schoolName}`}
+                    checked={isSelected}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleOne(inv.schoolKey);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-accent-600 focus:ring-accent-500"
+                  />
                   <span className="truncate text-sm font-medium text-slate-900">
                     {inv.schoolName}
                   </span>
                   <span className="text-xs text-slate-500">
                     Ref: {inv.reference}
                   </span>
-                  {duplicates.some((d) => d.schoolKey === inv.schoolKey) && (
-                    <span className="badge-amber">Possible duplicate</span>
-                  )}
+                  {isDup && <span className="badge-amber">Possible duplicate</span>}
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <span className="text-slate-500">
@@ -309,7 +409,8 @@ export default function Review(): JSX.Element {
                 </table>
               </div>
             </details>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -409,14 +510,18 @@ export default function Review(): JSX.Element {
             <button
               type="button"
               onClick={handleCreate}
-              disabled={creating || prepared.length === 0 || !settings?.accountCode}
+              disabled={
+                creating ||
+                selectedInvoices.length === 0 ||
+                !settings?.accountCode
+              }
               className="btn-primary w-full"
             >
               {creating
-                ? `Creating ${progress?.index ?? 0} of ${progress?.total ?? prepared.length}…`
+                ? `Creating ${progress?.index ?? 0} of ${progress?.total ?? selectedInvoices.length}…`
                 : effectiveDryRun
-                  ? `Run dry run (${prepared.length})`
-                  : `Create ${prepared.length} drafts in Xero`}
+                  ? `Run dry run (${selectedInvoices.length})`
+                  : `Create ${selectedInvoices.length} ${plural(selectedInvoices.length, 'draft')} in Xero`}
             </button>
             {creating && progress && (
               <div className="text-xs text-slate-500">

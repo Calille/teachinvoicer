@@ -33,6 +33,7 @@ export interface BridgeApi {
   };
   dialog: {
     openSpreadsheet: () => Promise<string | null>;
+    saveCsv: (defaultName: string, contents: string) => Promise<string | null>;
   };
   xero: {
     status: () => Promise<ConnectionStatus>;

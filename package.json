@@ -1,6 +1,6 @@
 {
   "name": "xero-invoicer",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "Xero Invoice Automation desktop app for Teach Education / Keep Education",
   "author": "Josh",
   "main": "out/main/index.js",

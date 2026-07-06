@@ -41,6 +41,7 @@ export type ParseWarning = {
 export type ParseResult = {
   weekEndingDate: string; // DD/MM/YYYY
   filename: string;
+  sheetName: string; // the worksheet the parser actually read from
   invoices: ParsedInvoice[];
   warnings: ParseWarning[];
   totals: {

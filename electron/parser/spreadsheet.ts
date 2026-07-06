@@ -42,14 +42,24 @@ function safeString(v: unknown): string {
 
 function safeNumber(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  if (v instanceof Date) return v.getTime();
   if (typeof v === 'string') {
     const trimmed = v.trim();
-    if (!trimmed || trimmed === '#DIV/0!' || trimmed === '#N/A' || trimmed === '#VALUE!') {
+    if (!trimmed) return null;
+    // Common Excel error strings — treat as "no value".
+    if (/^#(DIV\/0!|N\/A|VALUE!|REF!|NAME\?|NUM!|NULL!|GETTING_DATA)$/i.test(trimmed)) {
       return null;
     }
-    const cleaned = trimmed.replace(/[£,$\s]/g, '');
+    // Strip currency, commas, and trailing/leading whitespace.
+    // Handle (123.45) accounting-style negatives.
+    const isParenNegative = /^\(.*\)$/.test(trimmed);
+    const cleaned = trimmed
+      .replace(/[£$€,\s]/g, '')
+      .replace(/^\(/, '-')
+      .replace(/\)$/, '');
     const n = Number(cleaned);
-    if (Number.isFinite(n)) return n;
+    if (Number.isFinite(n)) return isParenNegative && n > 0 ? -n : n;
   }
   return null;
 }
@@ -70,20 +80,20 @@ function isSectionHeader(row: unknown[]): boolean {
   return c === 'frequency' && e === 'teacher';
 }
 
-function normaliseSchoolKey(name: string): string {
-  return name
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+// Catch "Total", "Sub-total", "Grand Total", "Total for Norfolk", etc.
+const TOTAL_LIKE_RE = /^(grand\s+|sub[\s-]*)?(total|totals|subtotal)\b/i;
+
+function looksLikeTotalsRow(school: string, teacher: string): boolean {
+  return TOTAL_LIKE_RE.test(school) || TOTAL_LIKE_RE.test(teacher);
 }
 
 const AWR_RE = /\(\s*awr\s*\)/i;
 
 /**
  * Short summary of the spreadsheet row, used only for the Parse preview
- * screen. The actual invoice line descriptions are generated separately in
- * src/lib/billing.ts so we can split full/part days into their own line items
- * without the W/E (which is already on the invoice as the reference).
+ * screen. Invoice line descriptions are generated separately in
+ * src/lib/billing.ts so we can split full/part days into their own line
+ * items without the W/E (already on the invoice as the reference).
  */
 function buildDescription(
   fullDays: number,
@@ -92,14 +102,49 @@ function buildDescription(
 ): string {
   const parts: string[] = [];
   if (fullDays > 0) {
-    parts.push(`${fullDays} full day${fullDays === 1 ? '' : 's'}`);
+    const label = Number.isInteger(fullDays)
+      ? `${fullDays} full day${fullDays === 1 ? '' : 's'}`
+      : `${fullDays} full days`;
+    parts.push(label);
   }
   if (partDays > 0) {
-    parts.push(`${partDays} part day${partDays === 1 ? '' : 's'}`);
+    const label = Number.isInteger(partDays)
+      ? `${partDays} part day${partDays === 1 ? '' : 's'}`
+      : `${partDays} part days`;
+    parts.push(label);
   }
   const daysClause = parts.length > 0 ? parts.join(', ') : 'placement';
   const suffix = isAwr ? ' (AWR)' : '';
   return `${daysClause}${suffix}`;
+}
+
+/**
+ * Pick the worksheet to parse. Prefers a sheet literally named "Report";
+ * falls back to the first non-empty sheet (skipping any leading summary or
+ * cover sheets that don't look like the placement data).
+ */
+function pickSheet(workbook: XLSX.WorkBook): { name: string; sheet: XLSX.WorkSheet } {
+  if (workbook.Sheets['Report']) {
+    return { name: 'Report', sheet: workbook.Sheets['Report'] };
+  }
+  // Score each sheet by whether it has the columns we expect (Frequency in
+  // col C, Teacher in col E in some row).
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet || !sheet['!ref']) continue;
+    const sample = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      defval: null,
+      raw: true,
+      range: { s: { r: 0, c: 0 }, e: { r: 20, c: COL.awr } },
+    });
+    const hasHeader = sample.some((row) => isSectionHeader(row));
+    if (hasHeader) return { name, sheet };
+  }
+  // Last resort: first sheet.
+  const fallback = workbook.SheetNames[0];
+  return { name: fallback, sheet: workbook.Sheets[fallback] };
 }
 
 /**
@@ -109,13 +154,14 @@ function buildDescription(
 export function parseWorkbook(
   filePath: string,
   _weekEndingDate: string,
-): { lines: ParsedLine[]; warnings: ParseWarning[]; skippedCount: number } {
+): {
+  lines: ParsedLine[];
+  warnings: ParseWarning[];
+  skippedCount: number;
+  sheetName: string;
+} {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
-  const sheetName =
-    workbook.Sheets['Report'] !== undefined
-      ? 'Report'
-      : (workbook.SheetNames[0] ?? '');
-  const sheet = workbook.Sheets[sheetName];
+  const { name: sheetName, sheet } = pickSheet(workbook);
   if (!sheet) {
     throw new Error('No worksheet found in the spreadsheet.');
   }
@@ -131,9 +177,14 @@ export function parseWorkbook(
   const warnings: ParseWarning[] = [];
   let skippedCount = 0;
 
+  // Compute the spreadsheet row offset so rowNumber displays match what Josh
+  // sees in Excel (some sheets start at row 1, others later).
+  const ref = sheet['!ref'];
+  const startRow = ref ? XLSX.utils.decode_range(ref).s.r : 0;
+
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
-    const rowNumber = i + 1; // 1-indexed to match spreadsheet display
+    const rowNumber = startRow + i + 1; // 1-indexed to match Excel display
 
     if (!row || row.length === 0 || isAllNullOrEmpty(row)) {
       skippedCount += 1;
@@ -154,11 +205,24 @@ export function parseWorkbook(
 
     const teacher = safeString(row[COL.teacher]).trim();
     if (!teacher) {
-      // School row without a teacher: nothing to invoice. Note it.
+      // School row without a teacher: nothing to invoice. Note it (could be
+      // a region-name row or a stray label).
       warnings.push({
         rowNumber,
         school: schoolRaw,
         reason: 'school row had no teacher in column E',
+      });
+      skippedCount += 1;
+      continue;
+    }
+
+    // Defensive guard against subtotal rows that happen to have a value in
+    // col B and some label in col E. We won't bill against "Total" lines.
+    if (looksLikeTotalsRow(schoolRaw, teacher)) {
+      warnings.push({
+        rowNumber,
+        school: schoolRaw,
+        reason: 'row looks like a subtotal/total (excluded from invoices)',
       });
       skippedCount += 1;
       continue;
@@ -197,12 +261,15 @@ export function parseWorkbook(
 
     const fullDaysRaw = safeNumber(row[COL.fullDays]);
     const partDaysRaw = safeNumber(row[COL.partDays]);
-    const fullDays = fullDaysRaw !== null ? Math.round(fullDaysRaw) : 0;
-    const partDays = partDaysRaw !== null ? Math.round(partDaysRaw) : 0;
+    // Preserve precision — don't round. Fractional day counts (e.g. 0.5)
+    // do happen and the totals depend on them being honest.
+    const fullDays = fullDaysRaw ?? 0;
+    const partDays = partDaysRaw ?? 0;
     const hours = safeNumber(row[COL.hours]);
 
     const awrFromCol = safeString(row[COL.awr]).trim();
-    const isAwr = AWR_RE.test(notesRaw) || (awrFromCol.length > 0 && AWR_RE.test(awrFromCol));
+    const isAwr =
+      AWR_RE.test(notesRaw) || (awrFromCol.length > 0 && AWR_RE.test(awrFromCol));
 
     const description = buildDescription(fullDays, partDays, isAwr);
 
@@ -222,7 +289,7 @@ export function parseWorkbook(
     });
   }
 
-  return { lines, warnings, skippedCount };
+  return { lines, warnings, skippedCount, sheetName };
 }
 
 function extractWeekEndingFromFilename(filename: string): string | null {
@@ -255,12 +322,13 @@ export function registerParserIpc(): void {
           `Couldn't read the week ending date from the filename "${filename}". Please enter it manually.`,
         );
       }
-      const { lines, warnings, skippedCount } = parseWorkbook(filePath, weekEnding);
+      const { lines, warnings, skippedCount, sheetName } = parseWorkbook(filePath, weekEnding);
       const invoices = groupBySchool(lines);
       const grandTotal = invoices.reduce((sum, i) => sum + i.totalAmount, 0);
       const result: ParseResult = {
         weekEndingDate: weekEnding,
         filename,
+        sheetName,
         invoices,
         warnings,
         totals: {
